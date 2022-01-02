@@ -7,3 +7,166 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## 1. Setting up a new GitHub repository
+
+The project on GitHub is named "DSPM_AssignmentV", it can be accessed with the following link:
+https://github.com/kevin19982/DSPM_AssignmentV
+
+
+## 2. Getting to know the API
+
+The API-key is stored in a separate file, which is ignored when pushing changes to the repository.
+It is stored in a file named "api_key.R"
+
+
+## 3. Interacting with the API - the basics
+
+First the environment is cleared and the set up conducted.
+```{r set up, warning = FALSE}
+
+# clear workspace
+rm(list = ls())
+
+# load relevant libraries
+library(jsonlite)
+library(httr)
+library(rlist)
+library(tidyverse)
+library(naniar)
+
+# laod the key
+source("api_key.R")
+
+```
+
+According to the description on the website of tickemaster the get-command is written, that extracts information about events in germany.
+```{r get query}
+
+# get event venues in germany
+event_ger <- GET("https://app.ticketmaster.com/discovery/v2/events.json?",
+                 query = list(apikey = api_key,
+                              countryCode = "DE")) %>% content()
+
+```
+The resulting object contains a list with the name "_embedded", which includes the extracted events, which in this case is 20, and information about them. There is also a list "_links", which includes information about the query and a list named "page", that includes information about the data (pagesize, number of pages etc.).
+
+
+```{r extract information}
+
+# command to get the required elements
+event <- event_ger[["_embedded"]]$events[[1]][["_embedded"]]$venues[[1]]$city$name
+
+# number of observations
+n <- 20
+
+event_info <- tibble(
+  name <- character(n),
+  city <- character(n),
+  postalCode <- character(n),
+  address <- character(n),
+  url <- character(n),
+  longitude <- character(n),
+  latitude <- character(n)
+)
+
+for (i in 1:20){
+  event_info[i, 1] <- event_ger[["_embedded"]]$events[[i]]$name
+  event_info[i, 2] <- event_ger[["_embedded"]]$events[[i]][["_embedded"]]$venues[[1]]$city$name
+  event_info[i, 3] <- event_ger[["_embedded"]]$events[[i]][["_embedded"]]$venues[[1]]$postalCode
+  event_info[i, 4] <- event_ger[["_embedded"]]$events[[i]][["_embedded"]]$venues[[1]]$city$name
+  event_info[i, 5] <- event_ger[["_embedded"]]$events[[i]][["_embedded"]]$venues[[1]]$url
+  event_info[i, 6] <- event_ger[["_embedded"]]$events[[i]][["_embedded"]]$venues[[1]]$location$longitude
+  event_info[i, 7] <- event_ger[["_embedded"]]$events[[i]][["_embedded"]]$venues[[1]]$location$latitude
+}
+
+# check the extracted data
+glimpse(event_info)
+
+```
+
+
+## 4. Interacting with the API - advanced
+
+All the venues in germany can be extracted by using the venue search and adding "DE" as a country code.
+```{r complete data}
+
+# check what using venue search retrieves
+event_info_complete <- GET("https://app.ticketmaster.com/discovery/v2/venues.json?",
+                           query = list(apikey = api_key,
+                           countryCode = "DE")) %>% content()
+
+# number of results
+n <- as.numeric(event_info_complete[["page"]]$totalElements)
+print(n)
+
+# number of elements per complete page
+page_size <- as.numeric(event_info_complete[["page"]]$size)
+
+# number of complete pages
+pages_complete <- floor(n/page_size)
+
+# number of entries on the last page
+rest_complete <- n - page_size * floor(n/page_size) # number of total elements - accumulated number of elements on complete pages
+
+# create result data frame
+event_info_complete <- tibble(
+  name <- character(n),
+  city <- character(n),
+  postalCode <- character(n),
+  address <- character(n),
+  url <- character(n),
+  longitude <- character(n),
+  latitude <- character(n))
+
+# retrieve complete data
+for (i in 0:pages_complete) { # appearently the pages start at 0
+  result_event <- GET("https://app.ticketmaster.com/discovery/v2/venues.json?",
+                      query = list(apikey = api_key,
+                                   countryCode = "DE",
+                                   page = i)) 
+  
+  event_content <- content(result_event)
+  
+  # delay the next operation to retrieve information less than 5 times per second
+  Sys.sleep(0.2)
+  
+  # retrieve the specific information, it does not work for some observation, because they do not include every variable, hence there are NA-values assigned
+  for (t in 1:page_size) {
+    if (is.null(event_content[["_embedded"]]$venues[[t]]$name)) {
+      event_info_complete[(i) * page_size + t, 1] <- NA
+    } else {
+      event_info_complete[(i) * page_size + t, 1] <- event_content[["_embedded"]]$venues[[t]]$name
+    }
+    if (is.null(event_content[["_embedded"]]$venues[[t]]$city$name)) {
+      event_info_complete[(i) * page_size + t, 2] <- NA
+    } else {
+      event_info_complete[(i) * page_size + t, 2] <- event_content[["_embedded"]]$venues[[t]]$city$name
+    }
+    event_info_complete[(i) * page_size + t, 3] <- event_content[["_embedded"]]$venues[[t]]$postalCode
+    if (is.null(event_content[["_embedded"]]$venues[[t]]$address$line1)) {
+      event_info_complete[(i) * page_size + t, 4] <- NA
+    } else {
+      event_info_complete[(i) * page_size + t, 4] <- event_content[["_embedded"]]$venues[[t]]$address$line1
+    }
+    event_info_complete[(i) * page_size + t, 5] <- event_content[["_embedded"]]$venues[[t]]$url
+    if (is.null(event_content[["_embedded"]]$venues[[t]]$location$longitude)) {
+      event_info_complete[(i) * page_size + t, 6] <- NA
+      event_info_complete[(i) * page_size + t, 7] <- NA
+    } else {
+      event_info_complete[(i) * page_size + t, 6] <- event_content[["_embedded"]]$venues[[t]]$location$longitude
+      event_info_complete[(i) * page_size + t, 7] <- event_content[["_embedded"]]$venues[[t]]$location$latitude
+    }
+  }
+  
+}
+
+
+
+
+
+# check the extracted data
+glimpse(event_info_complete)
+
+
+
+```
