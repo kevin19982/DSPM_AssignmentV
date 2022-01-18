@@ -22,7 +22,7 @@ It is stored in a file named "api_key.R"
 ## 3. Interacting with the API - the basics
 
 First the environment is cleared and the set up conducted.
-```{r set up, warning = FALSE}
+```{r set up, warning = FALSE, message = FALSE}
 
 # clear workspace
 rm(list = ls())
@@ -35,23 +35,22 @@ library(tidyverse)
 library(naniar)
 library(dplyr)
 
-# laod the key
+# load the key
 source("api_key.R")
 
 ```
 
-According to the description on the website of tickemaster the get-command is written, that extracts information about events in germany.
+According to the description on the website of ticketmaster the get-command is written, that extracts information about events in germany.
 ```{r get query}
 
 # get event venues in germany
-event_ger <- GET("https://app.ticketmaster.com/discovery/v2/events.json?",
-                 query = list(apikey = api_key,
-                              countryCode = "DE")) %>% content()
+event_ger <- GET("https://app.ticketmaster.com/discovery/v2/venues.json?countryCode=DE&",
+                 query = list(apikey = api_key)) %>% content()
 
 ```
 The resulting object contains a list with the name "_embedded", which includes the extracted events, which in this case is 20, and information about them. There is also a list "_links", which includes information about the query and a list named "page", that includes information about the data (pagesize, number of pages etc.).
 
-
+Extracting the relevant information and adding it to a dataframe. The size of the dataframe is predefined for faster computation.
 ```{r extract information}
 
 # command to get the required elements
@@ -71,13 +70,18 @@ event_info <- tibble(
 )
 
 for (i in 1:20){
-  event_info[i, 1] <- event_ger[["_embedded"]]$events[[i]]$name
-  event_info[i, 2] <- event_ger[["_embedded"]]$events[[i]][["_embedded"]]$venues[[1]]$city$name
-  event_info[i, 3] <- event_ger[["_embedded"]]$events[[i]][["_embedded"]]$venues[[1]]$postalCode
-  event_info[i, 4] <- event_ger[["_embedded"]]$events[[i]][["_embedded"]]$venues[[1]]$city$name
-  event_info[i, 5] <- event_ger[["_embedded"]]$events[[i]][["_embedded"]]$venues[[1]]$url
-  event_info[i, 6] <- event_ger[["_embedded"]]$events[[i]][["_embedded"]]$venues[[1]]$location$longitude
-  event_info[i, 7] <- event_ger[["_embedded"]]$events[[i]][["_embedded"]]$venues[[1]]$location$latitude
+  event_info[i, 1] <- event_ger[["_embedded"]]$venues[[i]]$name
+  event_info[i, 2] <- event_ger[["_embedded"]]$venues[[i]]$city$name
+  event_info[i, 3] <- event_ger[["_embedded"]]$venues[[i]]$postalCode
+  event_info[i, 4] <- event_ger[["_embedded"]]$venues[[i]]$address
+  event_info[i, 5] <- event_ger[["_embedded"]]$venues[[i]]$url
+  if (is.null(event_ger[["_embedded"]]$venues[[i]]$location$longitude)) {
+    event_info[i, 6] <- NA
+    event_info[i, 7] <- NA
+  } else {
+  event_info[i, 6] <- event_ger[["_embedded"]]$venues[[i]]$location$longitude
+  event_info[i, 7] <- event_ger[["_embedded"]]$venues[[i]]$location$latitude
+  }
 }
 
 # check the extracted data
@@ -88,7 +92,7 @@ glimpse(event_info)
 
 ## 4. Interacting with the API - advanced
 
-All the venues in germany can be extracted by using the venue search and adding "DE" as a country code.
+All the venues in germany can be extracted by using the venue search and adding "DE" as a country code. Assigning of values does not work if the field has no entry in the data, hence in this case NA's are assigned.
 ```{r complete data}
 
 # check what using venue search retrieves
@@ -236,25 +240,256 @@ glimpse(event_info_complete)
 
 ## 5. Visualizing the extracted data
 
+Drawing the map of germany and adding the points of the location, so their location is visible on the map.
 ```{r map of germany}
 
 # excluding extreme values
 event_info_complete_graphversion <- event_info_complete %>% filter(between(longitude, 5.866944, 15.043611))
-event_info_complete_graphversion <- event_info_complete %>% filter(between(latitude, 47.271679, 55.0846))
+event_info_complete_graphversion <- event_info_complete_graphversion %>% filter(between(latitude, 47.271679, 55.0846))
 
-# drawing the plot
+# drawing the plot, longitude and latitude are characters, hence there are transformed to numeric values
 ggplot() + 
-  geom_point(data = event_info_complete_graphversion, aes(x = longitude, y = latitude), col = "red", size = 0.01) +
   geom_polygon(
     aes(x = long, y = lat, group = group), data = map_data("world", region = "Germany"),
     fill = "grey90", color = "black") +
   theme_void() + coord_quickmap() +
   labs(title = "Event locations across Germany", caption = "Source: ticketmaster.com") +
   theme(title = element_text(size = 8, face = 'bold'),
-        plot.caption = element_text(face = "italic"))
+        plot.caption = element_text(face = "italic")) +  geom_point(aes(x = as.numeric(longitude), y = as.numeric(latitude)), data = event_info_complete_graphversion, col = "red", size = 1)
+
+```
+Some points are outside the map of germany, since the filter commands defined a rectangle (with a dimension of approximately 7x8).
 
 
+## 6. Event locations in other countries
 
+Repeating the operations for france.
+First, conduct a get request for france in general for the first page.
+```{r event locations france}
+
+
+# get event venues in france
+event_fr <- GET("https://app.ticketmaster.com/discovery/v2/venues.json?countryCode=FR&",
+                 query = list(apikey = api_key)) %>% content()
 
 
 ```
+
+Then get the relevant information from the first page (as with germany before). Luckily the structure of the data is the same as for germany.
+```{r information france}
+
+# command to get the required elements
+event <- event_fr[["_embedded"]]$events[[1]][["_embedded"]]$venues[[1]]$city$name
+
+# number of observations
+n_fr <- 20
+
+event_info_fr <- tibble(
+  name <- character(n_fr),
+  city <- character(n_fr),
+  postalCode <- character(n_fr),
+  address <- character(n_fr),
+  url <- character(n_fr),
+  longitude <- character(n_fr),
+  latitude <- character(n_fr)
+)
+
+for (i in 1:20){
+  event_info_fr[i, 1] <- event_fr[["_embedded"]]$venues[[i]]$name
+  event_info_fr[i, 2] <- event_fr[["_embedded"]]$venues[[i]]$city$name
+  event_info_fr[i, 3] <- event_fr[["_embedded"]]$venues[[i]]$postalCode
+  if (is.null(event_fr[["_embedded"]]$venues[[i]]$address$line1)) {
+    event_info_fr[i, 4] <- NA
+  } else {
+  address_fr_1 <- event_fr[["_embedded"]]$venues[[i]]$address$line1
+  address_fr_2 <- event_fr[["_embedded"]]$venues[[i]]$address$line2
+  event_info_fr[i, 4] <- paste(address_fr_1, address_fr_2, sep = " ")
+  }
+  if (is.null(event_fr[["_embedded"]]$venues[[i]]$url)) {
+    event_info_fr[i, 5] <- NA
+  } else {
+  event_info_fr[i, 5] <- event_fr[["_embedded"]]$venues[[i]]$url
+  }
+  if (is.null(event_fr[["_embedded"]]$venues[[i]]$location$longitude)) {
+    event_info_fr[i, 6] <- NA
+    event_info_fr[i, 7] <- NA
+  } else {
+  event_info_fr[i, 6] <- event_fr[["_embedded"]]$venues[[i]]$location$longitude
+  event_info_fr[i, 7] <- event_fr[["_embedded"]]$venues[[i]]$location$latitude
+  }
+}
+
+# check the extracted data
+glimpse(event_info_fr)
+
+```
+
+The next step is to get all the available data of event venues in france.
+```{r event venues france all}
+
+# check what using venue search retrieves
+event_info_complete_fr <- GET("https://app.ticketmaster.com/discovery/v2/venues.json?",
+                           query = list(apikey = api_key,
+                           countryCode = "FR")) %>% content()
+
+# number of results
+n_fr <- as.numeric(event_info_complete_fr[["page"]]$totalElements)
+print(n_fr)
+
+# number of elements per complete page
+page_size_fr <- as.numeric(event_info_complete_fr[["page"]]$size)
+
+# number of complete pages
+pages_complete_fr <- floor(n_fr/page_size_fr)
+
+# number of entries on the last page
+rest_complete_fr <- n_fr - page_size_fr * floor(n_fr/page_size_fr) # number of total elements - accumulated number of elements on complete pages
+
+# create result data frame
+event_info_complete_fr <- tibble(
+  name <- character(n_fr),
+  city <- character(n_fr),
+  postalCode <- character(n_fr),
+  address <- character(n_fr),
+  url <- character(n_fr),
+  longitude <- character(n_fr),
+  latitude <- character(n_fr))
+
+# retrieve complete data
+for (i in 1:pages_complete_fr - 1) { # appearently the pages start at 0
+  result_event_fr <- GET("https://app.ticketmaster.com/discovery/v2/venues.json?",
+                      query = list(apikey = api_key,
+                                   countryCode = "FR",
+                                   page = i)) 
+  
+  event_content_fr <- content(result_event_fr)
+  
+  # delay the next operation to retrieve information less than 5 times per second
+  Sys.sleep(0.2)
+  
+  # retrieve the specific information, it does not work for some observation, because they do not include every variable, hence there are NA-values assigned
+  for (t in 1:page_size_fr) {
+    if (is.null(event_content_fr[["_embedded"]]$venues[[t]]$name)) {
+      event_info_complete_fr[(i) * page_size_fr + t, 1] <- NA
+    } else {
+      event_info_complete_fr[(i) * page_size_fr + t, 1] <- event_content_fr[["_embedded"]]$venues[[t]]$name
+    }
+    
+    if (is.null(event_content_fr[["_embedded"]]$venues[[t]]$city$name)) {
+      event_info_complete_fr[(i) * page_size_fr + t, 2] <- NA
+    } else {
+      event_info_complete_fr[(i) * page_size_fr + t, 2] <- event_content_fr[["_embedded"]]$venues[[t]]$city$name
+    }
+    
+    if (is.null(event_content_fr[["_embedded"]]$venues[[t]]$postalCode)) {
+      event_info_complete_fr[(i) * page_size_fr + t, 3] <- NA
+    } else {
+      event_info_complete_fr[(i) * page_size_fr + t, 3] <- event_content[["_embedded"]]$venues[[t]]$postalCode
+    }
+    
+    if (is.null(event_content_fr[["_embedded"]]$venues[[t]]$address$line1)) {
+      event_info_complete_fr[(i) * page_size_fr + t, 4] <- NA
+    } else {
+      event_info_complete_fr[(i) * page_size_fr + t, 4] <- event_content_fr[["_embedded"]]$venues[[t]]$address$line1
+    }
+    
+    if (is.null(event_content_fr[["_embedded"]]$venues[[t]]$url)) {
+      event_info_complete_fr[(i) * page_size_fr + t, 5] <- NA
+    } else {
+      event_info_complete_fr[(i) * page_size_fr + t, 5] <- event_content_fr[["_embedded"]]$venues[[t]]$url
+    }
+    
+    if (is.null(event_content_fr[["_embedded"]]$venues[[t]]$location$longitude)) {
+      event_info_complete_fr[(i) * page_size_fr + t, 6] <- NA
+      event_info_complete_fr[(i) * page_size_fr + t, 7] <- NA
+    } else {
+      event_info_complete_fr[(i) * page_size_fr + t, 6] <- 
+        event_content_fr[["_embedded"]]$venues[[t]]$location$longitude
+      event_info_complete_fr[(i) * page_size_fr + t, 7] <- 
+        event_content_fr[["_embedded"]]$venues[[t]]$location$latitude
+    }
+  }
+  
+}
+
+
+# adding values from the last page, counting i up by 1 to do so
+i = i + 1
+
+# getting the values from the last page
+result_event_fr <- GET("https://app.ticketmaster.com/discovery/v2/venues.json?",
+                      query = list(apikey = api_key,
+                                   countryCode = "FR",
+                                   page = i))
+
+# adding the values from the last page to the dataframe
+for (t in 1:page_size_fr) {
+    if (is.null(event_content_fr[["_embedded"]]$venues[[t]]$name)) {
+      event_info_complete_fr[(i) * page_size_fr + t, 1] <- NA
+    } else {
+      event_info_complete_fr[(i) * page_size_fr + t, 1] <- event_content_fr[["_embedded"]]$venues[[t]]$name
+    }
+    
+    if (is.null(event_content_fr[["_embedded"]]$venues[[t]]$city$name)) {
+      event_info_complete_fr[(i) * page_size_fr + t, 2] <- NA
+    } else {
+      event_info_complete_fr[(i) * page_size_fr + t, 2] <- event_content_fr[["_embedded"]]$venues[[t]]$city$name
+    }
+    
+    if (is.null(event_content_fr[["_embedded"]]$venues[[t]]$postalCode)) {
+      event_info_complete_fr[(i) * page_size_fr + t, 3] <- NA
+    } else {
+      event_info_complete_fr[(i) * page_size_fr + t, 3] <- event_content_fr[["_embedded"]]$venues[[t]]$postalCode
+    }
+    
+    if (is.null(event_content_fr[["_embedded"]]$venues[[t]]$address$line1)) {
+      event_info_complete_fr[(i) * page_size_fr + t, 4] <- NA
+    } else {
+      event_info_complete_fr[(i) * page_size_fr + t, 4] <- event_content_fr[["_embedded"]]$venues[[t]]$address$line1
+    }
+    
+    if (is.null(event_content_fr[["_embedded"]]$venues[[t]]$url)) {
+      event_info_complete_fr[(i) * page_size_fr + t, 5] <- NA
+    } else {
+      event_info_complete_fr[(i) * page_size_fr + t, 5] <- event_content_fr[["_embedded"]]$venues[[t]]$url
+    }
+    
+    if (is.null(event_content[["_embedded"]]$venues[[t]]$location$longitude)) {
+      event_info_complete_fr[(i) * page_size_fr + t, 6] <- NA
+      event_info_complete_fr[(i) * page_size_fr + t, 7] <- NA
+    } else {
+      event_info_complete_fr[(i) * page_size_fr + t, 6] <- event_content[["_embedded"]]$venues[[t]]$location$longitude
+      event_info_complete_fr[(i) * page_size_fr + t, 7] <- event_content[["_embedded"]]$venues[[t]]$location$latitude
+    }
+  }
+
+
+colnames(event_info_complete_fr) <- c("name", "city", "postalCode", "address", "url", "longitude", "latitude")
+
+# check the extracted data
+glimpse(event_info_complete_fr)
+
+```
+Ticketmaster stored 91 locations in france, hence this calculation was rather fast.
+
+The next step is to draw the map and add the locations.
+```{r map of france}
+
+# excluding extreme values
+event_info_complete_graphversion_fr <- event_info_complete_fr %>% filter(between(longitude, 4, 8))
+event_info_complete_graphversion_fr <- event_info_complete_graphversion_fr %>% filter(between(latitude, 42, 51))
+
+# drawing the plot
+ggplot() + 
+  geom_polygon(
+    aes(x = long, y = lat, group = group), data = map_data("world", region = "France"),
+    fill = "grey90", color = "black") +
+  theme_void() + coord_quickmap() +
+  labs(title = "Event locations across France", caption = "Source: ticketmaster.com") +
+  theme(title = element_text(size = 8, face = 'bold'),
+        plot.caption = element_text(face = "italic")) +
+  geom_point(aes(x = as.numeric(longitude), y = as.numeric(latitude)), data = event_info_complete_graphversion_fr, col = "red", size = 2)
+
+```
+
+In this case the filter command also indirectly defined a rectangle, but all the relevant points are inside the map.
